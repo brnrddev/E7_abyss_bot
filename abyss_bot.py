@@ -1,3 +1,11 @@
+import ctypes
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    print("DPI Awareness v2 ativado")
+except Exception:
+    ctypes.windll.user32.SetProcessDPIAware()
+    print("DPI Awareness v1 ativado")
+
 import random
 import sys
 import threading
@@ -39,7 +47,7 @@ CONFIDENCE = {
     "back":    0.75,
 }
 
-CLICK_RAND         = 8
+CLICK_RAND         = 0
 DELAY_AFTER_REPLAY = (2.5, 4.0)
 DELAY_AFTER_START  = (3.0, 5.0)
 POLL_INTERVAL      = 0.5
@@ -74,14 +82,10 @@ def _hotkey_listener():
 
 # ─── Captura de tela (win32) ──────────────────────────────────────────────────
 
-
 def capture_screen() -> np.ndarray:
-    """Captura o monitor principal via GDI. Funciona com janelas elevadas."""
     hdesktop = win32gui.GetDesktopWindow()
-    width    = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
-    height   = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
-    left     = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
-    top      = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
+    width  = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+    height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
 
     desktop_dc = win32gui.GetWindowDC(hdesktop)
     img_dc     = win32ui.CreateDCFromHandle(desktop_dc)
@@ -90,7 +94,7 @@ def capture_screen() -> np.ndarray:
     bmp = win32ui.CreateBitmap()
     bmp.CreateCompatibleBitmap(img_dc, width, height)
     mem_dc.SelectObject(bmp)
-    mem_dc.BitBlt((0, 0), (width, height), img_dc, (left, top), win32con.SRCCOPY)
+    mem_dc.BitBlt((0, 0), (width, height), img_dc, (0, 0), win32con.SRCCOPY)
 
     info = bmp.GetInfo()
     data = bmp.GetBitmapBits(True)
@@ -107,7 +111,6 @@ def capture_screen() -> np.ndarray:
 
 
 # ─── Utilitários ──────────────────────────────────────────────────────────────
-
 
 def load_templates() -> dict:
     base = Path(__file__).parent
@@ -126,29 +129,49 @@ def load_templates() -> dict:
     return out
 
 
-def find_template(screen_gray, tmpl_gray, confidence):
-    res = cv2.matchTemplate(screen_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
-    _, max_val, _, max_loc = cv2.minMaxLoc(res)
-    if max_val >= confidence:
-        h, w = tmpl_gray.shape
-        return max_loc[0] + w // 2, max_loc[1] + h // 2
-    return None
-
-
 def find_template_score(screen_gray, tmpl_gray):
-    """Retorna o score do melhor match (para debug)."""
     res = cv2.matchTemplate(screen_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(res)
     return max_val, max_loc
 
 
+# ─── DPI Scale (calculado uma vez na inicialização) ───────────────────────────
+
+def _get_dpi_scale() -> float:
+    hdc = win32gui.GetDC(0)
+    dpi = win32ui.CreateDCFromHandle(hdc).GetDeviceCaps(88)  # LOGPIXELSX
+    win32gui.ReleaseDC(0, hdc)
+    return dpi / 96.0
+
+DPI_SCALE = _get_dpi_scale()
+
+
 def rclick(x, y, label=""):
+    """Clique em coordenadas FÍSICAS (vindo de template match)."""
+    lx = int((x + random.randint(-CLICK_RAND, CLICK_RAND)) / DPI_SCALE)
+    ly = int((y + random.randint(-CLICK_RAND, CLICK_RAND)) / DPI_SCALE)
+    tag = f" [{label}]" if label else ""
+    print(f"   🖱  clique{tag} → físico=({x},{y})  lógico=({lx},{ly})")
+    win32api.SetCursorPos((lx, ly))
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, lx, ly, 0, 0)
+    time.sleep(0.10)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, lx, ly, 0, 0)
+    time.sleep(0.15)
+
+
+def lclick(x, y, label=""):
+    """Clique em coordenadas LÓGICAS (hardcoded)."""
     ox = random.randint(-CLICK_RAND, CLICK_RAND)
     oy = random.randint(-CLICK_RAND, CLICK_RAND)
-    fx, fy = x + ox, y + oy
+    lx, ly = x + ox, y + oy
     tag = f" [{label}]" if label else ""
-    print(f"   🖱  clique{tag} → ({fx}, {fy})  [base: ({x}, {y}), offset: ({ox}, {oy})]")
-    pyautogui.click(fx, fy)
+    print(f"   🖱  clique{tag} → lógico=({lx},{ly})")
+    win32api.SetCursorPos((lx, ly))
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, lx, ly, 0, 0)
+    time.sleep(0.10)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, lx, ly, 0, 0)
     time.sleep(0.15)
 
 
@@ -161,71 +184,44 @@ def wait_check():
 
 
 def wait_for_template(templates, name, timeout=300.0):
-    print(f"   🔎 Aguardando template '{name}' (timeout={timeout:.0f}s)...")
     deadline = time.time() + timeout
-    attempts = 0
     while time.time() < deadline:
         wait_check()
         screen = capture_screen()
         score, loc = find_template_score(screen, templates[name])
-        pos = None
         if score >= CONFIDENCE[name]:
             h, w = templates[name].shape
             pos = (loc[0] + w // 2, loc[1] + h // 2)
-
-        attempts += 1
-        if attempts % 6 == 0:
-            status = f"encontrado em {pos}" if pos else f"não encontrado (melhor score: {score:.3f})"
-            print(f"   🔎 '{name}' — tentativa {attempts} — {status}")
-
-        if pos:
             print(f"   ✅ '{name}' encontrado em {pos} (score={score:.3f})")
             return pos
         time.sleep(POLL_INTERVAL)
 
     screen = capture_screen()
-    score, loc = find_template_score(screen, templates[name])
+    score, _ = find_template_score(screen, templates[name])
     raise TimeoutError(
-        f"'{name}' não encontrado após {timeout:.0f}s  "
-        f"(melhor score foi {score:.3f}, threshold={CONFIDENCE[name]})"
+        f"'{name}' não encontrado após {timeout:.0f}s "
+        f"(melhor score={score:.3f}, threshold={CONFIDENCE[name]})"
     )
 
 
 # ─── Lógica principal ─────────────────────────────────────────────────────────
 
-
 def wait_for_back(templates):
-    """
-    Loop pós-Confirm:
-    - Verifica se o Back está visível
-    - Se não, clica em (680, 342) para avançar animações e aguarda 5s
-    - Quando Back aparecer, clica em (205, 685) e retorna
-    """
-    print("\n⚔  [wait_for_back] Entrando no loop de espera pós-partida...")
-    loop = 0
-
+    print("\n⚔  Aguardando fim da partida...")
     while not _stop:
-        loop += 1
         wait_check()
-
         screen = capture_screen()
         back_score, back_loc = find_template_score(screen, templates["back"])
-        clear_score, clear_loc = find_template_score(screen, templates["clear"])
-
-        print(f"   🔁 Loop #{loop} — "
-              f"back score={back_score:.3f} (threshold={CONFIDENCE['back']}) | "
-              f"clear score={clear_score:.3f} (threshold={CONFIDENCE['clear']})")
 
         if back_score >= CONFIDENCE["back"]:
             h, w = templates["back"].shape
             back_pos = (back_loc[0] + w // 2, back_loc[1] + h // 2)
-            print(f"   ✅ Back detectado em {back_pos} — clicando em (205, 685)")
-            rclick(205, 685, label="Back fixo")
+            print(f"   ✅ Back detectado em {back_pos}")
+            lclick(205, 685, label="Back")       # ✅ coordenada lógica hardcoded
             time.sleep(1.5)
             return
 
-        print(f"   ⏳ Back não visível — clicando em (680, 342) para avançar animação")
-        rclick(680, 342, label="avanço tela")
+        lclick(680, 342, label="avanço tela")    # ✅ coordenada lógica hardcoded
         time.sleep(5)
 
 
@@ -236,18 +232,17 @@ def run_iteration(templates, iteration):
     print(f"{'═'*50}")
 
     # 1. Clica 7x em (872, 327)
-    print("\n[ETAPA 1] Navegando para Floor 2 — 7 cliques em (872, 327)")
-    ##time.sleep(1)
+    print("\n[ETAPA 1] Navegando para Floor 2")
+    time.sleep(1)
     for i in range(7):
-        print(f"   clique {i+1}/7 → (872, 327)")
         win32api.SetCursorPos((872, 327))
-        time.sleep(0.15)
+        time.sleep(0.40)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 872, 327, 0, 0)
-        time.sleep(0.15)
+        time.sleep(0.40)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 872, 327, 0, 0)
-        time.sleep(0.15)   
-    time.sleep(3.0)
-    print(f"   ✅ Navegação concluída ({time.time()-t_start:.1f}s)")
+        time.sleep(0.40)
+        print(f"   🖱  clique [Floor2 {i+1}/7] → (872, 327)")
+    time.sleep(1.0)
 
     # 2. Replay
     print("\n[ETAPA 2] Procurando Replay...")
@@ -268,10 +263,8 @@ def run_iteration(templates, iteration):
     wait_check()
     confirm_pos = wait_for_template(templates, "confirm", timeout=20)
     rclick(*confirm_pos, label="Confirm")
-    print(f"   ✅ Confirm clicado — partida iniciada ({time.time()-t_start:.1f}s desde início)")
 
     # 5. Espera pelo Back
-    print(f"\n[ETAPA 5] Aguardando fim da partida...")
     wait_for_back(templates)
 
     elapsed = time.time() - t_start
@@ -303,7 +296,6 @@ def update_report(iteration: int, start_time: float):
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
-
 
 def main():
     print("╔══════════════════════════════════════╗")

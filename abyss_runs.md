@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |-------|-------|
-| ✅ Runs completas | **29** |
-| ⏱ Tempo total | 00h 32m 57s |
-| 📊 Média por run | 1.1 min |
-| 🕐 Última run | 10/04/2026 16:29:43 |
+| ✅ Runs completas | **131** |
+| ⏱ Tempo total | 02h 57m 53s |
+| 📊 Média por run | 1.4 min |
+| 🕐 Última run | 11/04/2026 01:29:59 |
