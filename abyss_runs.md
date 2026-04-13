@@ -2,7 +2,6 @@
 
 | Campo | Valor |
 |-------|-------|
-| ✅ Runs completas | **10** |
-| ⏱ Tempo total | 00h 13m 00s |
-| 📊 Média por run | 1.3 min |
-| 🕐 Última run | 11/04/2026 15:53:41 |
+|  Runs completas | **27** (Radiance Coins: 810) |
+| Tempo total | 00h 37m 00s |
+| Média por run | 1.4 min |

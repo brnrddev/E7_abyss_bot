@@ -207,7 +207,7 @@ def wait_for_template(templates, name, timeout=300.0):
 # ─── Lógica principal ─────────────────────────────────────────────────────────
 
 def wait_for_back(templates):
-    print("\n⚔  Aguardando fim da partida...")
+    print("\n Aguardando fim da partida...")
     while not _stop:
         wait_check()
         screen = capture_screen()
@@ -216,12 +216,12 @@ def wait_for_back(templates):
         if back_score >= CONFIDENCE["back"]:
             h, w = templates["back"].shape
             back_pos = (back_loc[0] + w // 2, back_loc[1] + h // 2)
-            print(f"   ✅ Back detectado em {back_pos}")
-            lclick(205, 685, label="Back")       # ✅ coordenada lógica hardcoded
+            print(f"  Back detectado em {back_pos}")
+            lclick(205, 685, label="Back")  
             time.sleep(1.5)
             return
 
-        lclick(680, 342, label="avanço tela")    # ✅ coordenada lógica hardcoded
+        lclick(680, 342, label="avanço tela")
         time.sleep(5)
 
 
@@ -241,7 +241,7 @@ def run_iteration(templates, iteration):
         time.sleep(0.40)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 872, 327, 0, 0)
         time.sleep(0.40)
-        print(f"   🖱  clique [Floor2 {i+1}/7] → (872, 327)")
+        print(f"  clique [Floor2 {i+1}/7] → (872, 327)")
     time.sleep(1.0)
 
     # 2. Replay
@@ -268,7 +268,7 @@ def run_iteration(templates, iteration):
     wait_for_back(templates)
 
     elapsed = time.time() - t_start
-    print(f"\n✅ Iteração #{iteration} concluída em {elapsed/60:.1f} min")
+    print(f"\n Iteração #{iteration} concluída em {elapsed/60:.1f} min")
 
 
 # ─── Contador de runs ─────────────────────────────────────────────────────────
@@ -281,20 +281,20 @@ def update_report(iteration: int, start_time: float):
     hours   = int(elapsed // 3600)
     minutes = int((elapsed % 3600) // 60)
     seconds = int(elapsed % 60)
-    avg_min = (elapsed / max(iteration, 1)) / 60
+
+    avg_min = (elapsed / iteration / 60) if iteration > 0 else 0
+
+    radiance_coins = iteration * 30
 
     with open(REPORT_FILE, "w", encoding="utf-8") as f:
         f.write("# Abyss Challenge Mode — Floor 2 Bot\n\n")
         f.write("| Campo | Valor |\n")
         f.write("|-------|-------|\n")
-        f.write(f"| ✅ Runs completas | **{iteration}** |\n")
-        f.write(f"| ⏱ Tempo total | {hours:02d}h {minutes:02d}m {seconds:02d}s |\n")
-        f.write(f"| 📊 Média por run | {avg_min:.1f} min |\n")
-        f.write(f"| 🕐 Última run | {time.strftime('%d/%m/%Y %H:%M:%S')} |\n")
-
-    print(f"📝 Relatório atualizado → abyss_runs.md  (total: {iteration} runs)")
-
-
+        f.write(f"|  Runs completas | **{iteration}** (Radiance Coins: {radiance_coins}) |\n")
+        f.write(f"| Tempo total | {hours:02d}h {minutes:02d}m {seconds:02d}s |\n")
+        f.write(f"| Média por run | {avg_min:.1f} min |\n")
+        
+    print(f" Relatório atualizado → {REPORT_FILE}  (total: {iteration} runs)")
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -310,7 +310,7 @@ def main():
 
     templates = load_templates()
 
-    print(f"\n⏱  Iniciando em 5 segundos — clique no jogo!\n")
+    print(f"\n Iniciando em 5 segundos — clique no jogo!\n")
     time.sleep(5)
 
     iteration  = 1
@@ -322,14 +322,14 @@ def main():
             update_report(iteration, start_time)
             iteration += 1
         except TimeoutError as e:
-            print(f"\n⚠  Timeout: {e}\n   Reiniciando loop em 3s...")
+            print(f"\n Timeout: {e}\n   Reiniciando loop em 3s...")
             time.sleep(3)
         except RuntimeError as e:
             print(f"\n❌ {e}")
             sys.exit(1)
 
     update_report(iteration - 1, start_time)
-    print("\n✅ Bot finalizado.")
+    print(f"\n Bot finalizado. (Radiance Coins: {radiance_coins}  )" )
 
 
 if __name__ == "__main__":
