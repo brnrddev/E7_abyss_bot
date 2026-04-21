@@ -49,7 +49,7 @@ CLICK_RAND         = 0
 DELAY_AFTER_REPLAY = (2.5, 4.0)
 DELAY_AFTER_START  = (3.0, 5.0)
 POLL_INTERVAL      = 0.5
-
+game_window = "Epic Seven"
 # ─── Controle de pausa ────────────────────────────────────────────────────────
 
 _paused = False
@@ -77,33 +77,105 @@ def _hotkey_listener():
 
 # ─── Captura de tela (win32) ──────────────────────────────────────────────────
 
-def capture_screen() -> np.ndarray:
+def find_game_window(window_title_keyword=game_window):
+    """Encontra a janela do jogo pelo título"""
+    hwnd = win32gui.FindWindow(None, window_title_keyword)
+    if hwnd == 0:
+        windows = []
+        win32gui.EnumWindows(lambda h, l: windows.append((h, win32gui.GetWindowText(h))), None)
+        for h, title in windows:
+            if window_title_keyword.lower() in title.lower():
+                return h
+    return hwnd
+
+def screen_to_window_coords(hwnd, x, y):
+    """Converte coordenadas de desktop para coordenadas relativas à janela"""
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    return (x - left, y - top)
+
+def bg_click(hwnd, x, y, label="", relative=False):
+    """Clique em janela de background (sem ativar)
+    
+    Args:
+        hwnd: Handle da janela
+        x, y: Coordenadas (relativas à janela se relative=True, absolutas do desktop se False)
+        label: Descrição do clique
+        relative: Se True, x,y são relativas; se False, converte automaticamente
+    """
+    tag = f" [{label}]" if label else ""
+    
+    try:
+        if not relative:
+            # Converte coordenadas absolutas para relativas
+            x, y = screen_to_window_coords(hwnd, x, y)
+        
+        print(f"  clique{tag} → ({x},{y}) [BACKGROUND]")
+        
+        lparam = win32api.MAKELONG(int(x), int(y))
+        win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+        time.sleep(0.05)
+        win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+        time.sleep(0.15)
+    except Exception as e:
+        print(f"  ⚠️ Erro ao clicar: {e}")
+        
+def capture_screen(hwnd=None) -> np.ndarray:
+    """Captura a janela especificada ou todo o desktop"""
+    if hwnd:
+        try:
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            width = right - left
+            height = bottom - top
+            
+            desktop_dc = win32gui.GetWindowDC(hwnd)
+            img_dc = win32ui.CreateDCFromHandle(desktop_dc)
+            mem_dc = img_dc.CreateCompatibleDC()
+            
+            bmp = win32ui.CreateBitmap()
+            bmp.CreateCompatibleBitmap(img_dc, width, height)
+            mem_dc.SelectObject(bmp)
+            mem_dc.BitBlt((0, 0), (width, height), img_dc, (0, 0), win32con.SRCCOPY)
+            
+            info = bmp.GetInfo()
+            data = bmp.GetBitmapBits(True)
+            img = np.frombuffer(data, dtype=np.uint8).reshape(
+                (info["bmHeight"], info["bmWidth"], 4)
+            )
+            
+            mem_dc.DeleteDC()
+            img_dc.DeleteDC()
+            win32gui.ReleaseDC(hwnd, desktop_dc)
+            win32gui.DeleteObject(bmp.GetHandle())
+            
+            return cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+        except:
+            pass
+    
     hdesktop = win32gui.GetDesktopWindow()
-    width  = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+    width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
     height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
-
+    
     desktop_dc = win32gui.GetWindowDC(hdesktop)
-    img_dc     = win32ui.CreateDCFromHandle(desktop_dc)
-    mem_dc     = img_dc.CreateCompatibleDC()
-
+    img_dc = win32ui.CreateDCFromHandle(desktop_dc)
+    mem_dc = img_dc.CreateCompatibleDC()
+    
     bmp = win32ui.CreateBitmap()
     bmp.CreateCompatibleBitmap(img_dc, width, height)
     mem_dc.SelectObject(bmp)
     mem_dc.BitBlt((0, 0), (width, height), img_dc, (0, 0), win32con.SRCCOPY)
-
+    
     info = bmp.GetInfo()
     data = bmp.GetBitmapBits(True)
-    img  = np.frombuffer(data, dtype=np.uint8).reshape(
+    img = np.frombuffer(data, dtype=np.uint8).reshape(
         (info["bmHeight"], info["bmWidth"], 4)
     )
-
+    
     mem_dc.DeleteDC()
     img_dc.DeleteDC()
     win32gui.ReleaseDC(hdesktop, desktop_dc)
     win32gui.DeleteObject(bmp.GetHandle())
-
+    
     return cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
-
 
 # ─── Utilitários ──────────────────────────────────────────────────────────────
 
@@ -184,36 +256,6 @@ def _get_dpi_scale() -> float:
 
 DPI_SCALE = _get_dpi_scale()
 
-
-def rclick(x, y, label=""):
-    """Clique em coordenadas FÍSICAS (vindo de template match)."""
-    lx = int((x + random.randint(-CLICK_RAND, CLICK_RAND)) / DPI_SCALE)
-    ly = int((y + random.randint(-CLICK_RAND, CLICK_RAND)) / DPI_SCALE)
-    tag = f" [{label}]" if label else ""
-    print(f"  clique{tag} → físico=({x},{y})  lógico=({lx},{ly})")
-    win32api.SetCursorPos((lx, ly))
-    time.sleep(0.05)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, lx, ly, 0, 0)
-    time.sleep(0.10)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, lx, ly, 0, 0)
-    time.sleep(0.15)
-
-
-def lclick(x, y, label=""):
-    """Clique em coordenadas LÓGICAS (hardcoded)."""
-    ox = random.randint(-CLICK_RAND, CLICK_RAND)
-    oy = random.randint(-CLICK_RAND, CLICK_RAND)
-    lx, ly = x + ox, y + oy
-    tag = f" [{label}]" if label else ""
-    print(f"  clique{tag} → lógico=({lx},{ly})")
-    win32api.SetCursorPos((lx, ly))
-    time.sleep(0.05)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, lx, ly, 0, 0)
-    time.sleep(0.10)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, lx, ly, 0, 0)
-    time.sleep(0.15)
-
-
 def wait_check():
     while _paused:
         time.sleep(0.3)
@@ -222,11 +264,11 @@ def wait_check():
         sys.exit(0)
 
 
-def wait_for_template(templates, name, timeout=300.0):
+def wait_for_template(templates, name, timeout=300.0, hwnd=None): 
     deadline = time.time() + timeout
     while time.time() < deadline:
         wait_check()
-        screen = capture_screen()
+        screen = capture_screen(hwnd)
         score, loc = find_template_score(screen, templates[name])
         if score >= CONFIDENCE[name]:
             h, w = templates[name].shape
@@ -235,83 +277,90 @@ def wait_for_template(templates, name, timeout=300.0):
             return pos
         time.sleep(POLL_INTERVAL)
 
-    screen = capture_screen()
+    screen = capture_screen(hwnd)
     score, _ = find_template_score(screen, templates[name])
     raise TimeoutError(
         f"'{name}' não encontrado após {timeout:.0f}s "
         f"(melhor score={score:.3f}, threshold={CONFIDENCE[name]})"
     )
-
-
-# ─── Lógica principal ─────────────────────────────────────────────────────────
-
-def wait_for_back(templates):
+    
+def wait_for_back(templates, hwnd):  # ← ADICIONE hwnd
     print("\n Aguardando fim da partida...")
     while not _stop:
         wait_check()
-        screen = capture_screen()
+        screen = capture_screen(hwnd)  # ← ADICIONE hwnd
         back_score, back_loc = find_template_score(screen, templates["back"])
 
         if back_score >= CONFIDENCE["back"]:
             h, w = templates["back"].shape
             back_pos = (back_loc[0] + w // 2, back_loc[1] + h // 2)
             print(f"  Back detectado em {back_pos}")
-            lclick(205, 685, label="Back")  
+            bg_click(hwnd, 205, 685, label="Back")  # ← MUDE para bg_click
             time.sleep(1.5)
             return
 
-        lclick(680, 342, label="avanço tela")
+        bg_click(hwnd, 680, 342, label="avanço tela")  # ← MUDE para bg_click
         time.sleep(5)
-
-
-def run_iteration(templates, iteration):
+        
+def run_iteration(templates, iteration, hwnd):
     t_start = time.time()
     print(f"\n{'═'*50}")
     print(f"  Iteração #{iteration}  —  {time.strftime('%H:%M:%S')}")
     print(f"{'═'*50}")
 
-    # 1. Clica 7x em (872, 327)
+    # 1. Clica 7x em (872, 327) - COORDENADAS RELATIVAS À JANELA
     print("\n[ETAPA 1] Navegando para Floor 2")
     time.sleep(1)
     for i in range(7):
-        win32api.SetCursorPos((872, 327))
+        bg_click(hwnd, 872, 327, label=f"Floor2 {i+1}/7", relative=True)  # ← relative=True
         time.sleep(0.40)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 872, 327, 0, 0)
-        time.sleep(0.40)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 872, 327, 0, 0)
-        time.sleep(0.40)
-        print(f"  clique [Floor2 {i+1}/7] → (872, 327)")
     time.sleep(1.0)
 
     # 2. Replay
     print("\n[ETAPA 2] Procurando Replay...")
-    replay_pos = wait_for_template(templates, "replay", timeout=15)
-    rclick(*replay_pos, label="Replay")
+    replay_pos = wait_for_template(templates, "replay", timeout=15, hwnd=hwnd)
+    bg_click(hwnd, *replay_pos, label="Replay", relative=True)  # ← relative=True
 
     # 3. Start
     delay = random.uniform(*DELAY_AFTER_REPLAY)
     print(f"\n[ETAPA 3] Aguardando {delay:.1f}s antes do Start...")
     time.sleep(delay)
     wait_check()
-    start_pos = wait_for_template(templates, "start", timeout=20)
-    rclick(*start_pos, label="Start")
+    start_pos = wait_for_template(templates, "start", timeout=20, hwnd=hwnd)
+    bg_click(hwnd, *start_pos, label="Start", relative=True)  # ← relative=True
 
     # 4. Confirm
     print(f"\n[ETAPA 4] Aguardando 2s antes do Confirm...")
     time.sleep(2)
     wait_check()
-    confirm_pos = wait_for_template(templates, "confirm", timeout=20)
-    rclick(*confirm_pos, label="Confirm")
+    confirm_pos = wait_for_template(templates, "confirm", timeout=20, hwnd=hwnd)
+    bg_click(hwnd, *confirm_pos, label="Confirm", relative=True)  # ← relative=True
 
     # 5. Espera pelo Back
-    wait_for_back(templates)
+    wait_for_back(templates, hwnd)
 
     elapsed = time.time() - t_start
     print(f"\n Iteração #{iteration} concluída em {elapsed/60:.1f} min")
 
 
-# ─── Contador de runs ─────────────────────────────────────────────────────────
+def wait_for_back(templates, hwnd):
+    print("\n Aguardando fim da partida...")
+    while not _stop:
+        wait_check()
+        screen = capture_screen(hwnd)
+        back_score, back_loc = find_template_score(screen, templates["back"])
 
+        if back_score >= CONFIDENCE["back"]:
+            h, w = templates["back"].shape
+            back_pos = (back_loc[0] + w // 2, back_loc[1] + h // 2)
+            print(f"  Back detectado em {back_pos}")
+            bg_click(hwnd, 205, 685, label="Back", relative=True)  # ← relative=True
+            time.sleep(1.5)
+            return
+
+        bg_click(hwnd, 680, 342, label="avanço tela", relative=True)  # ← relative=True
+        time.sleep(5)
+    
 def update_report(iteration: int, start_time: float):
     global completed_runs
 
@@ -328,7 +377,6 @@ def update_report(iteration: int, start_time: float):
         completed_runs = iteration
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
-
 def main():
     print("╔══════════════════════════════════════╗")
     print("║  F12 → Parar                         ║")
@@ -336,9 +384,17 @@ def main():
 
     threading.Thread(target=_hotkey_listener, daemon=True).start()
 
+    print("Procurando janela do jogo...")
+    game_hwnd = find_game_window(game_window)
+    if game_hwnd == 0:
+        print("❌ Janela não encontrada! Verificar título da janela.")
+        sys.exit(1)
+    
+    print(f"Janela encontrada (HWND: {game_hwnd})")
+
     templates = load_templates()
 
-    print(f"\n Iniciando em 5 segundos — clique no jogo!\n")
+    print(f"\n Iniciando em 5 segundos\n")
     threading.Thread(target=show_counter, daemon=True).start()
     time.sleep(5)
 
@@ -349,7 +405,7 @@ def main():
 
     while not _stop:
         try:
-            run_iteration(templates, iteration)
+            run_iteration(templates, iteration, game_hwnd)
             update_report(iteration, start_time)
             iteration += 1
         except TimeoutError as e:
